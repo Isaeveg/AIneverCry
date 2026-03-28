@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: The Data Refinery API
+  title: AINEVERCRY API
   version: 1.0.0
   description: Secure gateway for transforming unstructured data into clean JSON.
 servers:

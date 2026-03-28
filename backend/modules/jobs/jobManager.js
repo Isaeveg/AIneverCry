@@ -26,6 +26,7 @@ function createJob(files) {
       processedAt: null,
       extractedData: null,
       sanitizedData: null,
+      annotation: null,
       errors: [],
     })),
     result: null,
@@ -93,6 +94,17 @@ function addFileError(jobId, fileId, error) {
     timestamp: new Date().toISOString(),
   });
 
+  saveJob(job);
+  return job;
+}
+
+function updateFileAnnotation(jobId, fileIndex, annotation) {
+  const job = loadJob(jobId);
+  if (!job) return null;
+
+  if (fileIndex < 0 || fileIndex >= job.files.length) return null;
+
+  job.files[fileIndex].annotation = annotation;
   saveJob(job);
   return job;
 }
@@ -213,6 +225,7 @@ module.exports = {
   updateJobStatus,
   updateFileResult,
   addFileError,
+  updateFileAnnotation,
   setJobResult,
   getJobSummary,
   exportJobAsJson,

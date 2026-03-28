@@ -103,6 +103,27 @@ app.get('/api/v1/jobs/:id/export', (req, res) => {
     }
 });
 
+app.put('/api/v1/jobs/:id/annotation', express.json(), (req, res) => {
+    try {
+        const jobId = req.params.id;
+        const { fileIndex, annotation } = req.body;
+
+        if (fileIndex === undefined || !annotation) {
+            return res.status(400).json({ error: 'File index and annotation required' });
+        }
+
+        const updated = jobManager.updateFileAnnotation(jobId, fileIndex, annotation);
+        if (!updated) {
+            return res.status(404).json({ error: 'Job or file not found' });
+        }
+
+        res.json({ success: true, message: 'Annotation saved' });
+    } catch (err) {
+        console.error('Error saving annotation:', err);
+        res.status(500).json({ error: 'Failed to save annotation' });
+    }
+});
+
 app.get('/api/v1/jobs', (req, res) => {
     try {
         const limit = req.query.limit ? parseInt(req.query.limit) : 50;
@@ -117,14 +138,14 @@ app.get('/api/v1/jobs', (req, res) => {
 app.get('/api/v1/health', (req, res) => {
     res.json({
         status: 'ok',
-        server: 'Data Refinery Gateway',
+        server: 'AINEVERCRY Gateway',
         version: '1.0.0',
         uptime: process.uptime(),
     });
 });
 
 app.listen(PORT, () => {
-    console.log(`\n🚀 Data Refinery Backend started on http://localhost:${PORT}`);
+    console.log(`\n🚀 AINEVERCRY Backend started on http://localhost:${PORT}`);
     console.log(`📍 API Base: http://localhost:${PORT}/api/v1`);
     console.log(`\n📚 Available endpoints:`);
     console.log(`  POST   /api/v1/jobs              - Create job with files`);

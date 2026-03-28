@@ -20,6 +20,7 @@ const FileIcon = ({ type, isAlert }: { type: string, isAlert?: boolean }) => {
 interface WorkspaceFile {
   id: string;
   jobId?: string;
+  fileIndex?: number;
   name: string;
   type: string;
   statusColor: 'green' | 'orange' | 'red';
@@ -39,6 +40,7 @@ const historyFiles: WorkspaceFile[] = [
 function App() {
   const [activeTab, setActiveTab] = useState('Workspace');
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
   const [selectedFile, setSelectedFile] = useState<WorkspaceFile | null>(null);
@@ -115,6 +117,7 @@ function App() {
         const newFile: WorkspaceFile = {
           id: `${jobId}-${index}`,
           jobId,
+          fileIndex: index,
           name: file.name,
           type: file.name.split('.').pop()?.toUpperCase() || 'GEN',
           statusColor: 'orange',
@@ -145,23 +148,62 @@ function App() {
     }
   };
 
-  const exportBatch = async () => {
-    const refined = workspaceFiles.filter(f => f.statusColor === 'green');
-    if (refined.length === 0) return;
+  const toggleFileSelection = (fileId: string) => {
+    setSelectedFileIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(fileId)) {
+        newSet.delete(fileId);
+      } else {
+        newSet.add(fileId);
+      }
+      return newSet;
+    });
+  };
 
-    const jobIds = [...new Set(refined.map(f => f.jobId).filter(Boolean))];
+  const selectAllVisible = () => {
+    const visibleIds = new Set(filtered.map(f => f.id));
+    setSelectedFileIds(visibleIds);
+  };
+
+  const clearSelection = () => {
+    setSelectedFileIds(new Set());
+  };
+
+  const exportBatch = async () => {
+    const toExport = selectedFileIds.size > 0
+      ? workspaceFiles.filter(f => selectedFileIds.has(f.id) && f.statusColor === 'green')
+      : workspaceFiles.filter(f => f.statusColor === 'green');
+
+    if (toExport.length === 0) {
+      alert('No files to export. Please select and process files first.');
+      return;
+    }
+
+    const jobIds = [...new Set(toExport.map(f => f.jobId).filter(Boolean))];
     let allData = {
-      system: "Data Refinery Gateway",
-      operator: "AIneverCry Team",
+      system: 'AINEVERCRY Gateway',
+      operator: 'Data Operator',
       timestamp: new Date().toISOString(),
-      bundle_id: `BCK-${Date.now()}`,
+      bundle_id: `EXP-${Date.now()}`,
       files: [] as any[]
     };
 
     for (const jobId of jobIds) {
       const jobData = await fetchJobData(jobId);
       if (jobData?.files) {
-        allData.files.push(...jobData.files);
+        const filesWithLocal = jobData.files
+          .filter((backendFile: any) => toExport.some(f => f.name === backendFile.originalName))
+          .map((backendFile: any) => {
+            const localFile = toExport.find(f => f.name === backendFile.originalName);
+            return {
+              ...backendFile,
+              metadata: {
+                ...backendFile.metadata,
+                operatorAnnotation: localFile?.desc || backendFile.metadata?.operatorAnnotation || ''
+              }
+            };
+          });
+        allData.files.push(...filesWithLocal);
       }
     }
 
@@ -170,14 +212,24 @@ function App() {
     a.href = URL.createObjectURL(blob);
     a.download = `refinery_export_${allData.bundle_id}.json`;
     a.click();
+    setSelectedFileIds(new Set());
   };
 
-  const saveMetadata = () => {
-    if (selectedFile) {
+  const saveMetadata = async () => {
+    if (!selectedFile || selectedFile.fileIndex === undefined || !selectedFile.jobId) return;
+
+    try {
+      await axios.put(`${API_URL}/jobs/${selectedFile.jobId}/annotation`, {
+        fileIndex: selectedFile.fileIndex,
+        annotation: editDesc
+      });
+
       setWorkspaceFiles(prev => prev.map(f =>
         f.id === selectedFile.id ? { ...f, desc: editDesc } : f
       ));
       setSelectedFile(null);
+    } catch (err) {
+      console.error('Failed to save annotation:', err);
     }
   };
 
@@ -205,29 +257,31 @@ function App() {
   const renderGrid = (list: WorkspaceFile[], showAdd = false) => (
     <div className="file-grid">
       {list.map(file => (
-        <div key={file.id} className="file-card" onClick={() => openReview(file)}>
-          <span className={`status-dot dot-${file.statusColor}`}></span>
-          <div className="file-icon-container">
-            <FileIcon type={file.type} isAlert={file.statusColor === 'red'} />
+        <div key={file.id} className="file-card-wrapper">
+          <input
+            type="checkbox"
+            className="file-checkbox"
+            checked={selectedFileIds.has(file.id)}
+            onChange={() => toggleFileSelection(file.id)}
+            disabled={file.statusColor !== 'green'}
+          />
+          <div className="file-card" onClick={() => openReview(file)}>
+            <span className={`status-dot dot-${file.statusColor}`}></span>
+            <div className="file-icon-container">
+              <FileIcon type={file.type} isAlert={file.statusColor === 'red'} />
+            </div>
+            <div className="file-name">{file.name}</div>
+            <div className="file-meta">{file.size} • {file.date}</div>
           </div>
-          <div className="file-name">{file.name}</div>
-          <div className="file-meta">{file.size} • {file.date}</div>
         </div>
       ))}
-      {showAdd && (
-        <div className="file-card upload-card-empty" onClick={() => fileInputRef.current?.click()}>
-          <div className="file-icon-container"><div className="upload-icon-big">+</div></div>
-          <div className="file-name">Ingest File</div>
-          <div className="file-meta">Click to upload</div>
-        </div>
-      )}
     </div>
   );
 
   return (
     <div className="app-container">
       <aside className="sidebar">
-        <div className="brand"><div className="brand-logo">AIneverCry</div></div>
+        <div className="brand"><div className="brand-logo">AINEVERCRY</div></div>
         <nav className="nav-links">
           {['Workspace', 'History', 'Settings'].map(tab => (
             <button key={tab} className={`nav-btn ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
@@ -242,10 +296,10 @@ function App() {
           <div className="header-title">{activeTab}</div>
           {activeTab === 'Workspace' && (
             <div className="header-actions">
-              <button className="btn-outline" onClick={exportBatch} disabled={uploading}>Commit Batch</button>
+              <button className="btn-outline" onClick={exportBatch} disabled={uploading}>Export</button>
               <input type="file" multiple ref={fileInputRef} onChange={handleUpload} style={{ display: 'none' }} disabled={uploading} />
               <button className="btn-primary" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                {uploading ? 'Uploading...' : 'Ingest Data'}
+                {uploading ? 'Uploading...' : 'Upload'}
               </button>
             </div>
           )}
@@ -257,64 +311,141 @@ function App() {
               <div className="toolbar">
                 <input className="search-input" placeholder="Search by filename..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                 <select className="filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-                  <option value="All">All Entities</option>
-                  <option value="green">Refined</option>
+                  <option value="All">All Files</option>
+                  <option value="green">Clean</option>
                   <option value="orange">Processing</option>
-                  <option value="red">Security Alerts</option>
+                  <option value="red">Warnings</option>
                 </select>
               </div>
-              {renderGrid(filtered, !uploading && filterStatus === 'All' && searchQuery === '')}
+              {renderGrid(filtered, false)}
+              {filtered.length > 0 && (
+                <div className="selection-footer">
+                  <span className="selection-count">{selectedFileIds.size} selected</span>
+                  <div className="selection-buttons">
+                    <button className="btn-outline btn-small" onClick={selectAllVisible}>Select All</button>
+                    <button className="btn-outline btn-small" onClick={clearSelection}>Clear</button>
+                  </div>
+                </div>
+              )}
             </>
           )}
           {activeTab === 'History' && renderGrid(historyFiles)}
-          {activeTab === 'Settings' && <div style={{color: '#666', fontSize: '0.9rem', padding: '1rem'}}>System configuration panel restricted.</div>}
+          {activeTab === 'Settings' && <div style={{color: '#666', fontSize: '0.9rem', padding: '1rem'}}>Configuration is restricted to administrators.</div>}
         </section>
       </main>
 
       {selectedFile && (
         <div className="modal-overlay" onClick={() => setSelectedFile(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="modal-header">
-              <h2>Data Object Review</h2>
-              <button onClick={() => setSelectedFile(null)}>✕</button>
+              <h2>File Details</h2>
+              <button onClick={() => setSelectedFile(null)}>×</button>
             </div>
             <div className="modal-body">
-              <div className="view-panel">
-                <h3>Operator Annotation</h3>
-                <input className="desc-input" value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="Provide context description..." />
-                <h3>Sanitized Content Preview</h3>
-                <div className="text-box">
-                  {selectedFile.extractedData?.content
-                    ? selectedFile.extractedData.content.substring(0, 500)
-                    : 'Content extraction successful. PII data redacted. Data integrity verified. [SECURE_MODE]'}
-                </div>
-              </div>
-              <div className="view-panel">
-                <h3>Schema Output (JSON)</h3>
-                <pre className="json-box">
-                  {selectedFile.extractedData
-                    ? JSON.stringify({
+              {selectedFile.extractedData && (
+                <>
+                  <div className="view-panel">
+                    <h3>Processing Status</h3>
+                    <div className="processing-status-inline">
+                      <div className="status-item">
+                        <span className="status-icon">✓</span>
+                        <div>
+                          <div className="status-label">Validation</div>
+                          <div className="status-value">PASSED</div>
+                        </div>
+                      </div>
+                      <div className="status-item">
+                        <span className={`status-icon ${selectedFile.extractedData.secure ? 'safe' : 'warning'}`}>
+                          {selectedFile.extractedData.secure ? '✓' : '⚠'}
+                        </span>
+                        <div>
+                          <div className="status-label">Security</div>
+                          <div className="status-value">{selectedFile.extractedData.secure ? 'SAFE' : 'WARNINGS'}</div>
+                        </div>
+                      </div>
+                      <div className="status-item">
+                        <span className="status-icon">✓</span>
+                        <div>
+                          <div className="status-label">Extraction</div>
+                          <div className="status-value">SUCCESS</div>
+                        </div>
+                      </div>
+                      <div className="status-item">
+                        <span className={`status-icon ${selectedFile.extractedData.processing?.piiRedacted ? 'warning' : ''}`}>
+                          {selectedFile.extractedData.processing?.piiRedacted ? '⚠' : '✓'}
+                        </span>
+                        <div>
+                          <div className="status-label">PII Check</div>
+                          <div className="status-value">{selectedFile.extractedData.processing?.piiRedacted ? 'REDACTED' : 'CLEAN'}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedFile.extractedData.warnings && selectedFile.extractedData.warnings.length > 0 && (
+                      <div className="warnings-panel">
+                        <div className="warnings-title">⚠ Warnings</div>
+                        <div className="warnings-list">
+                          {selectedFile.extractedData.warnings.map((w: string, i: number) => (
+                            <div key={i} className="warning-item">{w}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="view-panel">
+                    <h3>Sanitized Content Preview</h3>
+                    <div className="text-box">
+                      {selectedFile.extractedData.content
+                        ? selectedFile.extractedData.content.substring(0, 500)
+                        : 'Content extraction successful. PII data redacted. Data integrity verified.'}
+                    </div>
+                  </div>
+
+                  <div className="view-panel">
+                    <h3>Schema Output</h3>
+                    <pre className="json-box">
+                      {JSON.stringify({
                         id: selectedFile.extractedData.id,
+                        originalName: selectedFile.extractedData.originalName,
                         type: selectedFile.type,
                         secure: selectedFile.extractedData.secure,
                         annotation: editDesc,
                         processing: selectedFile.extractedData.processing,
                         warnings: selectedFile.extractedData.warnings,
-                        metadata: selectedFile.extractedData.metadata
-                      }, null, 2)
-                    : JSON.stringify({
-                        id: selectedFile.id,
-                        type: selectedFile.type,
-                        secure: true,
-                        annotation: editDesc,
-                        system_meta: { size: selectedFile.size }
+                        metadata: {
+                          fileSize: selectedFile.extractedData.metadata?.fileSize,
+                          processedAt: selectedFile.extractedData.metadata?.processedAt
+                        }
                       }, null, 2)}
-                </pre>
+                    </pre>
+                  </div>
+                </>
+              )}
+
+              {!selectedFile.extractedData && (
+                <div className="view-panel">
+                  <h3>Schema Output (JSON)</h3>
+                  <pre className="json-box">
+                    {JSON.stringify({
+                      id: selectedFile.id,
+                      type: selectedFile.type,
+                      secure: true,
+                      annotation: editDesc,
+                      system_meta: { size: selectedFile.size }
+                    }, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              <div className="view-panel">
+                <h3>Operator Annotation</h3>
+                <input className="desc-input" value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="Provide context description..." />
               </div>
             </div>
             <div className="modal-footer">
               <button className="btn-outline" onClick={() => setSelectedFile(null)}>Dismiss</button>
-              <button className="btn-primary" onClick={saveMetadata}>Approve & Commit</button>
+              <button className="btn-primary" onClick={saveMetadata}>Save Annotation</button>
             </div>
           </div>
         </div>

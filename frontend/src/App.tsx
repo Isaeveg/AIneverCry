@@ -1,5 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
 import './App.css';
+
+const API_URL = 'http://localhost:4000/api/v1';
 
 const FileIcon = ({ type, isAlert }: { type: string, isAlert?: boolean }) => {
   const cls = isAlert ? "f-icon-alert" : `f-icon-${type.toLowerCase()}`;
@@ -14,74 +17,183 @@ const FileIcon = ({ type, isAlert }: { type: string, isAlert?: boolean }) => {
   );
 };
 
-const initialWorkspaceFiles = [
-  { id: 1, name: 'q4_financial_statement.pdf', type: 'PDF', statusColor: 'green', size: '2.4 MB', date: '12 min ago', desc: 'Verified financial data for auditing' },
-  { id: 2, name: 'raw_user_activity_log.csv', type: 'CSV', statusColor: 'orange', size: '42 KB', date: 'Just now', desc: '' },
-  { id: 3, name: 'network_integrity_check.exe', type: 'EXE', statusColor: 'red', size: '1.1 MB', date: '1 min ago', desc: '' },
-];
+interface WorkspaceFile {
+  id: string;
+  jobId?: string;
+  name: string;
+  type: string;
+  statusColor: 'green' | 'orange' | 'red';
+  size: string;
+  date: string;
+  desc: string;
+  isMalicious?: boolean;
+  extractedData?: any;
+  errors?: string[];
+  warnings?: string[];
+}
 
-const historyFiles = [
-  { id: 101, name: 'legacy_data_backup_2024.pdf', type: 'PDF', statusColor: 'green', size: '15 MB', date: 'Jan 20, 2026', desc: 'Archived system snapshot' },
+const historyFiles: WorkspaceFile[] = [
+  { id: '101', name: 'legacy_data_backup_2024.pdf', type: 'PDF', statusColor: 'green', size: '15 MB', date: 'Jan 20, 2026', desc: 'Archived system snapshot' },
 ];
 
 function App() {
   const [activeTab, setActiveTab] = useState('Workspace');
-  const [workspaceFiles, setWorkspaceFiles] = useState(initialWorkspaceFiles);
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
-  const [selectedFile, setSelectedFile] = useState<any>(null);
+  const [selectedFile, setSelectedFile] = useState<WorkspaceFile | null>(null);
   const [editDesc, setEditDesc] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [pollingJobs, setPollingJobs] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
-    const uploaded = Array.from(e.target.files);
-    uploaded.forEach((file, index) => {
-      const name = file.name;
-      const ext = name.split('.').pop()?.toUpperCase() || 'GEN';
-      let statusColor = 'orange';
-      if (name.toLowerCase().includes('.exe') || name.split('.').length > 2) statusColor = 'red';
-      const newFile = {
-        id: Date.now() + index,
-        name, type: ext, statusColor,
-        size: (file.size / 1024).toFixed(1) + ' KB',
-        date: 'Just now', desc: ''
-      };
-      setWorkspaceFiles(prev => [newFile, ...prev]);
-      if (statusColor === 'orange') {
-        setTimeout(() => {
-          setWorkspaceFiles(prev => prev.map(f => f.id === newFile.id ? { ...f, statusColor: 'green' } : f));
-        }, 2500);
+  useEffect(() => {
+    if (pollingJobs.size === 0) return;
+
+    const pollInterval = setInterval(async () => {
+      const jobsToRemove: string[] = [];
+
+      for (const jobId of pollingJobs) {
+        try {
+          const response = await axios.get(`${API_URL}/jobs/${jobId}`);
+          const jobStatus = response.data;
+
+          setWorkspaceFiles(prev => prev.map(file => {
+            if (file.jobId === jobId) {
+              let statusColor: 'green' | 'orange' | 'red' = 'orange';
+              const fileData = jobStatus.files.find((f: any) => f.originalName === file.name);
+
+              if (jobStatus.status === 'completed') {
+                statusColor = fileData?.isMalicious ? 'red' : 'green';
+                jobsToRemove.push(jobId);
+              } else if (jobStatus.status === 'processing') {
+                statusColor = 'orange';
+              } else if (jobStatus.status === 'failed') {
+                statusColor = 'red';
+                jobsToRemove.push(jobId);
+              }
+
+              return { ...file, statusColor };
+            }
+            return file;
+          }));
+        } catch (err) {
+          console.error(`Failed to poll job ${jobId}:`, err);
+        }
       }
+
+      if (jobsToRemove.length > 0) {
+        setPollingJobs(prev => {
+          const newSet = new Set(prev);
+          jobsToRemove.forEach(id => newSet.delete(id));
+          return newSet;
+        });
+      }
+    }, 1000);
+
+    return () => clearInterval(pollInterval);
+  }, [pollingJobs]);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+
+    setUploading(true);
+    const formData = new FormData();
+
+    Array.from(e.target.files).forEach(file => {
+      formData.append('files', file);
     });
-    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    try {
+      const response = await axios.post(`${API_URL}/jobs`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      const jobId = response.data.jobId;
+
+      Array.from(e.target.files!).forEach((file, index) => {
+        const newFile: WorkspaceFile = {
+          id: `${jobId}-${index}`,
+          jobId,
+          name: file.name,
+          type: file.name.split('.').pop()?.toUpperCase() || 'GEN',
+          statusColor: 'orange',
+          size: (file.size / 1024).toFixed(1) + ' KB',
+          date: 'Just now',
+          desc: ''
+        };
+        setWorkspaceFiles(prev => [newFile, ...prev]);
+      });
+
+      setPollingJobs(prev => new Set([...prev, jobId]));
+    } catch (err) {
+      console.error('Upload failed:', err);
+      alert('File upload failed');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
-  const exportBatch = () => {
+  const fetchJobData = async (jobId: string) => {
+    try {
+      const response = await axios.get(`${API_URL}/jobs/${jobId}/export`);
+      return response.data;
+    } catch (err) {
+      console.error('Failed to fetch job data:', err);
+      return null;
+    }
+  };
+
+  const exportBatch = async () => {
     const refined = workspaceFiles.filter(f => f.statusColor === 'green');
     if (refined.length === 0) return;
-    const data = {
+
+    const jobIds = [...new Set(refined.map(f => f.jobId).filter(Boolean))];
+    let allData = {
       system: "Data Refinery Gateway",
       operator: "AIneverCry Team",
       timestamp: new Date().toISOString(),
       bundle_id: `BCK-${Date.now()}`,
-      files: refined.map(f => ({ name: f.name, type: f.type, secure: true, meta_desc: f.desc }))
+      files: [] as any[]
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+
+    for (const jobId of jobIds) {
+      const jobData = await fetchJobData(jobId);
+      if (jobData?.files) {
+        allData.files.push(...jobData.files);
+      }
+    }
+
+    const blob = new Blob([JSON.stringify(allData, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `refinery_export_${data.bundle_id}.json`;
+    a.download = `refinery_export_${allData.bundle_id}.json`;
     a.click();
   };
 
   const saveMetadata = () => {
-    setWorkspaceFiles(prev => prev.map(f => f.id === selectedFile.id ? { ...f, desc: editDesc } : f));
-    setSelectedFile(null);
+    if (selectedFile) {
+      setWorkspaceFiles(prev => prev.map(f =>
+        f.id === selectedFile.id ? { ...f, desc: editDesc } : f
+      ));
+      setSelectedFile(null);
+    }
   };
 
-  const openReview = (file: any) => {
+  const openReview = async (file: WorkspaceFile) => {
     setSelectedFile(file);
     setEditDesc(file.desc || '');
+
+    if (file.jobId && file.statusColor === 'green') {
+      const jobData = await fetchJobData(file.jobId);
+      if (jobData?.files) {
+        const fileData = jobData.files.find((f: any) => f.originalName === file.name);
+        if (fileData) {
+          setSelectedFile(prev => prev ? { ...prev, extractedData: fileData } : null);
+        }
+      }
+    }
   };
 
   const filtered = workspaceFiles.filter(f => {
@@ -90,7 +202,7 @@ function App() {
     return matchesSearch && matchesFilter;
   });
 
-  const renderGrid = (list: any[], showAdd = false) => (
+  const renderGrid = (list: WorkspaceFile[], showAdd = false) => (
     <div className="file-grid">
       {list.map(file => (
         <div key={file.id} className="file-card" onClick={() => openReview(file)}>
@@ -130,9 +242,11 @@ function App() {
           <div className="header-title">{activeTab}</div>
           {activeTab === 'Workspace' && (
             <div className="header-actions">
-              <button className="btn-outline" onClick={exportBatch}>Commit Batch</button>
-              <input type="file" multiple ref={fileInputRef} onChange={handleUpload} style={{ display: 'none' }} />
-              <button className="btn-primary" onClick={() => fileInputRef.current?.click()}>Ingest Data</button>
+              <button className="btn-outline" onClick={exportBatch} disabled={uploading}>Commit Batch</button>
+              <input type="file" multiple ref={fileInputRef} onChange={handleUpload} style={{ display: 'none' }} disabled={uploading} />
+              <button className="btn-primary" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                {uploading ? 'Uploading...' : 'Ingest Data'}
+              </button>
             </div>
           )}
         </header>
@@ -149,11 +263,11 @@ function App() {
                   <option value="red">Security Alerts</option>
                 </select>
               </div>
-              {renderGrid(filtered, searchQuery === '' && filterStatus === 'All')}
+              {renderGrid(filtered, !uploading && filterStatus === 'All' && searchQuery === '')}
             </>
           )}
           {activeTab === 'History' && renderGrid(historyFiles)}
-          {activeTab === 'Settings' && <div style={{color: '#666', fontSize: '0.8vw'}}>System configuration panel restricted.</div>}
+          {activeTab === 'Settings' && <div style={{color: '#666', fontSize: '0.9rem', padding: '1rem'}}>System configuration panel restricted.</div>}
         </section>
       </main>
 
@@ -161,19 +275,41 @@ function App() {
         <div className="modal-overlay" onClick={() => setSelectedFile(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Data Object Review: {selectedFile.name}</h2>
-              <button className="close-modal" onClick={() => setSelectedFile(null)}>✕</button>
+              <h2>Data Object Review</h2>
+              <button onClick={() => setSelectedFile(null)}>✕</button>
             </div>
             <div className="modal-body">
               <div className="view-panel">
                 <h3>Operator Annotation</h3>
                 <input className="desc-input" value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="Provide context description..." />
                 <h3>Sanitized Content Preview</h3>
-                <div className="text-box">Content extraction successful. PII data redacted. Data integrity verified. [SECURE_MODE]</div>
+                <div className="text-box">
+                  {selectedFile.extractedData?.content
+                    ? selectedFile.extractedData.content.substring(0, 500)
+                    : 'Content extraction successful. PII data redacted. Data integrity verified. [SECURE_MODE]'}
+                </div>
               </div>
               <div className="view-panel">
                 <h3>Schema Output (JSON)</h3>
-                <pre className="json-box">{JSON.stringify({uuid: selectedFile.id, type: selectedFile.type, secure: true, annotation: editDesc, system_meta: {size: selectedFile.size}}, null, 2)}</pre>
+                <pre className="json-box">
+                  {selectedFile.extractedData
+                    ? JSON.stringify({
+                        id: selectedFile.extractedData.id,
+                        type: selectedFile.type,
+                        secure: selectedFile.extractedData.secure,
+                        annotation: editDesc,
+                        processing: selectedFile.extractedData.processing,
+                        warnings: selectedFile.extractedData.warnings,
+                        metadata: selectedFile.extractedData.metadata
+                      }, null, 2)
+                    : JSON.stringify({
+                        id: selectedFile.id,
+                        type: selectedFile.type,
+                        secure: true,
+                        annotation: editDesc,
+                        system_meta: { size: selectedFile.size }
+                      }, null, 2)}
+                </pre>
               </div>
             </div>
             <div className="modal-footer">

@@ -34,3 +34,10 @@ Thumbs.db
 # General
 log/
 *.log
+
+# Environment variables
+.env
+
+node_modules/
+
+backend/uploads/

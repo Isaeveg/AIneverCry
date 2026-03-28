@@ -16,6 +16,8 @@ build/
 
 # Backend Specific
 backend/uploads/
+backend/jobs/
+backend/logs/
 /tmp/
 /generated/prisma
 

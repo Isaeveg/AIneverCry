@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const logger = require('../logger');
 
 const FILE_SIGNATURES = {
   PDF: [0x25, 0x50, 0x44, 0x46],
@@ -34,6 +35,7 @@ function getActualMimeType(filePath) {
 
     return 'text/plain';
   } catch (err) {
+    logger.error('Failed to detect MIME type', { filePath, error: err.message });
     return null;
   }
 }

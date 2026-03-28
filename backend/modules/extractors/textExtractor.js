@@ -1,15 +1,26 @@
 const fs = require('fs');
 
+function removeTextNoise(content) {
+  return content
+    .replace(/[\r\n]{3,}/g, '\n\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/^\s+|\s+$/gm, '')
+    .split('\n')
+    .filter(line => line.trim().length > 0)
+    .join('\n');
+}
+
 function extractFromTxt(filePath) {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
+    const cleanContent = removeTextNoise(content);
     return {
       success: true,
       type: 'TXT',
-      rawContent: content,
-      lines: content.split('\n').length,
-      characters: content.length,
-      preview: content.substring(0, 500),
+      rawContent: cleanContent,
+      lines: cleanContent.split('\n').length,
+      characters: cleanContent.length,
+      preview: cleanContent.substring(0, 500),
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -19,17 +30,18 @@ function extractFromTxt(filePath) {
 function extractFromMarkdown(filePath) {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n');
+    const cleanContent = removeTextNoise(content);
+    const lines = cleanContent.split('\n');
     const headings = lines.filter(l => l.match(/^#+\s/)).map(h => h.trim());
 
     return {
       success: true,
       type: 'MD',
-      rawContent: content,
+      rawContent: cleanContent,
       lines: lines.length,
-      characters: content.length,
+      characters: cleanContent.length,
       headings: headings,
-      preview: content.substring(0, 500),
+      preview: cleanContent.substring(0, 500),
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -52,14 +64,18 @@ function extractFromCsv(filePath) {
     const headers = rows[0];
     const data = rows.slice(1);
 
+    const cleanedData = data.map(row =>
+      row.map(cell => removeTextNoise(cell))
+    );
+
     return {
       success: true,
       type: 'CSV',
       headers: headers,
-      rowCount: data.length,
+      rowCount: cleanedData.length,
       columnCount: headers.length,
-      data: data.slice(0, 10),
-      preview: `${headers.length} columns, ${data.length} rows`,
+      data: cleanedData.slice(0, 10),
+      preview: `${headers.length} columns, ${cleanedData.length} rows`,
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -88,17 +104,17 @@ function extractFromPdf(filePath) {
         .trim();
     }
 
-    const preview = extractedText.substring(0, 500);
-    const lines = extractedText.split('\n').length;
+    const cleanContent = removeTextNoise(extractedText);
+    const preview = cleanContent.substring(0, 500);
+    const lines = cleanContent.split('\n').length;
 
     return {
       success: true,
       type: 'PDF',
-      rawContent: extractedText,
+      rawContent: cleanContent,
       lines: lines,
-      characters: extractedText.length,
+      characters: cleanContent.length,
       preview: preview,
-      note: 'Basic text extraction - production should use pdf-parse library',
     };
   } catch (err) {
     return { success: false, error: err.message };

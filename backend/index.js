@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const jobManager = require('./modules/jobs/jobManager');
 const { processJobFiles } = require('./modules/fileProcessor');
+const logger = require('./modules/logger');
 
 const app = express();
 const PORT = 4000;
@@ -33,8 +34,11 @@ const upload = multer({
 app.post('/api/v1/jobs', upload.array('files'), async (req, res) => {
     try {
         if (!req.files || req.files.length === 0) {
+            logger.warn('Upload attempted with no files');
             return res.status(400).json({ error: 'No files provided' });
         }
+
+        logger.info('Files uploaded', { count: req.files.length, filenames: req.files.map(f => f.originalname) });
 
         const files = req.files.map(file => ({
             originalName: file.originalname,
@@ -43,6 +47,7 @@ app.post('/api/v1/jobs', upload.array('files'), async (req, res) => {
         }));
 
         const job = jobManager.createJob(files);
+        logger.info('Job created', { jobId: job.id, fileCount: files.length });
 
         const filePaths = req.files.map(file => ({
             filePath: file.path,
@@ -61,8 +66,8 @@ app.post('/api/v1/jobs', upload.array('files'), async (req, res) => {
             message: 'Job created. Processing started...',
         });
     } catch (err) {
-        console.error('Upload error:', err);
-        res.status(500).json({ error: 'Failed to create job' });
+        logger.error('Upload error', { error: err.message, stack: err.stack });
+        res.status(500).json({ error: 'Failed to create job', details: err.message });
     }
 });
 
@@ -72,12 +77,14 @@ app.get('/api/v1/jobs/:id', (req, res) => {
         const summary = jobManager.getJobSummary(jobId);
 
         if (!summary) {
+            logger.warn('Job not found', { jobId });
             return res.status(404).json({ error: 'Job not found' });
         }
 
+        logger.debug('Job summary fetched', { jobId, status: summary.status });
         res.json(summary);
     } catch (err) {
-        console.error('Error fetching job:', err);
+        logger.error('Error fetching job', { jobId: req.params.id, error: err.message });
         res.status(500).json({ error: 'Failed to fetch job' });
     }
 });
@@ -145,6 +152,7 @@ app.get('/api/v1/health', (req, res) => {
 });
 
 app.listen(PORT, () => {
+    logger.info(`Server started on http://localhost:${PORT}`);
     console.log(`\n🚀 AINEVERCRY Backend started on http://localhost:${PORT}`);
     console.log(`📍 API Base: http://localhost:${PORT}/api/v1`);
     console.log(`\n📚 Available endpoints:`);

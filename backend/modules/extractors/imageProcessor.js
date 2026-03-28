@@ -151,11 +151,48 @@ function formatFileSize(bytes) {
   return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
 
+function checkImageNormalization(dimensions, fileSize) {
+  const MAX_DIMENSION = 2000;
+  const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+  const needsSizeReduction = dimensions.width > MAX_DIMENSION || dimensions.height > MAX_DIMENSION;
+  const needsCompression = fileSize > MAX_FILE_SIZE;
+
+  let recommendedWidth = dimensions.width;
+  let recommendedHeight = dimensions.height;
+
+  if (needsSizeReduction) {
+    const ratio = dimensions.width / dimensions.height;
+    if (dimensions.width > dimensions.height) {
+      recommendedWidth = MAX_DIMENSION;
+      recommendedHeight = Math.round(MAX_DIMENSION / ratio);
+    } else {
+      recommendedHeight = MAX_DIMENSION;
+      recommendedWidth = Math.round(MAX_DIMENSION * ratio);
+    }
+  }
+
+  return {
+    needsNormalization: needsSizeReduction || needsCompression,
+    needsSizeReduction,
+    needsCompression,
+    currentDimensions: { width: dimensions.width, height: dimensions.height },
+    recommendedDimensions: { width: recommendedWidth, height: recommendedHeight },
+    currentSize: fileSize,
+    recommendedQuality: needsCompression ? 85 : 95,
+    details: {
+      sizingIssue: needsSizeReduction ? `Image exceeds ${MAX_DIMENSION}px limit` : 'Image size OK',
+      compressionIssue: needsCompression ? `File size exceeds ${Math.round(MAX_FILE_SIZE / (1024 * 1024))}MB` : 'File size OK',
+    }
+  };
+}
+
 function getImageInfo(filePath, fileType) {
   try {
     const stats = fs.statSync(filePath);
     const dimensions = getImageDimensions(filePath);
     const metadata = checkExifData(filePath);
+    const normalization = checkImageNormalization(dimensions, stats.size);
 
     return {
       success: true,
@@ -166,6 +203,7 @@ function getImageInfo(filePath, fileType) {
       metadata: metadata.metadata,
       hasMetadata: metadata.hasExif || metadata.hasIptc || metadata.hasXmp,
       needsSanitization: metadata.hasExif || metadata.hasIptc || metadata.hasXmp,
+      normalization: normalization,
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -182,15 +220,29 @@ function processImage(filePath, fileType) {
   const sanitizedPath = filePath + '.sanitized';
   const sanitization = sanitizeImage(filePath, sanitizedPath);
 
+  const sanitizationMessage = imageInfo.hasMetadata
+    ? 'Image contains metadata - sanitized copy created'
+    : 'Image is clean - no metadata detected';
+
+  const normalizationMessage = imageInfo.normalization.needsNormalization
+    ? `Normalization recommended: ${imageInfo.normalization.details.sizingIssue}${imageInfo.normalization.needsCompression ? ', ' + imageInfo.normalization.details.compressionIssue : ''}`
+    : 'Image dimensions and size are optimal';
+
   return {
     success: true,
     type: fileType,
     original: imageInfo,
     sanitization: sanitization,
     sanitizedPath: sanitizedPath,
-    recommendation: imageInfo.hasMetadata
-      ? 'Image contains metadata - sanitized copy created'
-      : 'Image is clean - no metadata detected',
+    normalizationReport: {
+      needsNormalization: imageInfo.normalization.needsNormalization,
+      recommendations: imageInfo.normalization,
+      message: normalizationMessage,
+    },
+    status: {
+      sanitized: imageInfo.hasMetadata,
+      normalized: imageInfo.normalization.needsNormalization ? 'RECOMMENDED' : 'OK',
+    }
   };
 }
 
@@ -198,6 +250,7 @@ module.exports = {
   getImageDimensions,
   checkExifData,
   sanitizeImage,
+  checkImageNormalization,
   getImageInfo,
   processImage,
 };

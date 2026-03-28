@@ -140,7 +140,7 @@ function getJobSummary(jobId) {
       detectedType: f.detectedType,
       status: f.processedAt ? 'processed' : 'pending',
       isMalicious: f.isMalicious || false,
-      hasErrors: f.errors.length > 0,
+      hasErrors: (f.errors?.length > 0) || (f.validationErrors?.length > 0) || (f.securityIssues?.length > 0),
     })),
   };
 }
@@ -149,37 +149,133 @@ function exportJobAsJson(jobId) {
   const job = loadJob(jobId);
   if (!job) return null;
 
+  const cleanExtractedData = (extracted) => {
+    if (!extracted) return null;
+
+    if (extracted.rawContent !== undefined) {
+      const cleaned = {
+        type: extracted.type,
+        format: extracted.format,
+        lines: extracted.lines,
+        characters: extracted.characters,
+        preview: extracted.preview,
+        headers: extracted.headers,
+        columnCount: extracted.columnCount,
+        rowCount: extracted.rowCount,
+      };
+
+      Object.keys(cleaned).forEach(key => cleaned[key] === undefined && delete cleaned[key]);
+
+      if (extracted.redactionDetails) {
+        cleaned.piiRedaction = {
+          applied: true,
+          patterns: extracted.redactionDetails.patternsRemoved,
+          originalLength: extracted.redactionDetails.originalLength,
+          redactedLength: extracted.redactionDetails.redactedLength,
+        };
+      }
+
+      return cleaned;
+    }
+
+    if (extracted.shapes !== undefined) {
+      return {
+        type: 'SVG',
+        format: 'SVG',
+        dimensions: {
+          width: extracted.width,
+          height: extracted.height,
+        },
+        shapes: extracted.shapes,
+      };
+    }
+
+    if (extracted.format === 'PNG' || extracted.format === 'JPG') {
+      const normalizationStatus = extracted.processingReport?.normalizationStatus || 'NOT_NEEDED';
+      const isNormalized = normalizationStatus === 'COMPLETED';
+
+      const imageExport = {
+        type: 'IMAGE',
+        format: extracted.format,
+        dimensions: {
+          original: extracted.dimensions?.original,
+        },
+        fileSize: {
+          original: extracted.fileSize?.original,
+        },
+        metadata: extracted.metadata || {},
+        sanitizationStatus: extracted.processingReport?.sanitizationStatus || 'NOT_NEEDED',
+        normalizationStatus: normalizationStatus,
+      };
+
+      if (isNormalized) {
+        imageExport.dimensions.normalized = extracted.dimensions?.normalized;
+        imageExport.fileSize.normalized = extracted.fileSize?.normalized;
+        imageExport.fileSize.compressionRatio = extracted.fileSize?.compressionRatio || null;
+      }
+
+      return imageExport;
+    }
+
+    return extracted;
+  };
+
+  const buildFileExport = (f) => {
+    const fileExport = {
+      id: f.id,
+      originalName: f.originalName,
+      type: f.detectedType,
+      mimeType: f.detectedMime,
+      secure: !f.isMalicious && (f.validationErrors?.length || 0) === 0 && (f.securityIssues?.length || 0) === 0,
+      processing: {
+        validated: (f.validationErrors?.length || 0) === 0,
+        extracted: !!f.extractedData,
+        sanitized: f.extractedData?.sanitized || false,
+        piiRedacted: f.extractedData?.redactionDetails ? true : false,
+      },
+    };
+
+    if (f.annotation || f.fileSize || f.processedAt) {
+      fileExport.metadata = {};
+      if (f.annotation) fileExport.metadata.annotation = f.annotation;
+      if (f.fileSize) fileExport.metadata.fileSize = f.fileSize;
+      if (f.processedAt) fileExport.metadata.processedAt = f.processedAt;
+    }
+
+    if (f.extractedData) {
+      fileExport.extracted = cleanExtractedData(f.extractedData);
+    }
+
+    if (f.warnings && f.warnings.length > 0) {
+      fileExport.warnings = f.warnings;
+    }
+
+    const validationErrors = f.validationErrors?.map(e => typeof e === 'string' ? e : e.message) || [];
+    if (validationErrors.length > 0) {
+      fileExport.validationErrors = validationErrors;
+    }
+
+    if (f.securityIssues && f.securityIssues.length > 0) {
+      fileExport.securityIssues = f.securityIssues;
+    }
+
+    return fileExport;
+  };
+
   const output = {
     system: 'Data Refinery Gateway',
     version: '1.0.0',
     jobId: job.jobId,
     processedAt: new Date().toISOString(),
     totalFiles: job.files.length,
-    files: job.files.map(f => ({
-      id: f.id,
-      originalName: f.originalName,
-      type: f.detectedType,
-      mimeType: f.detectedMime,
-      secure: !f.isMalicious && f.errors.length === 0,
-      metadata: {
-        operatorAnnotation: f.annotation || '',
-        fileSize: f.fileSize,
-        processedAt: f.processedAt,
-      },
-      processing: {
-        validated: !f.errors.includes('Validation failed'),
-        extracted: !!f.extractedData,
-        sanitized: !!f.sanitizedData,
-        piiRedacted: f.piiRedacted || false,
-      },
-      content: f.extractedData?.preview || f.extractedData?.rawContent || null,
-      warnings: f.warnings || [],
-      errors: f.errors.map(e => typeof e === 'string' ? e : e.message),
-    })),
+    files: job.files.map(f => buildFileExport(f)),
     summary: {
       totalProcessed: job.files.filter(f => f.processedAt).length,
-      totalFailed: job.files.filter(f => f.errors.length > 0).length,
-      secureFiles: job.files.filter(f => !f.isMalicious).length,
+      totalFailed: job.files.filter(f => (f.validationErrors?.length || 0) > 0).length,
+      secureFiles: job.files.filter(f => !f.isMalicious && (f.validationErrors?.length || 0) === 0 && (f.securityIssues?.length || 0) === 0).length,
+      filesWithPII: job.files.filter(f => f.extractedData?.redactionDetails).length,
+      filesWithSecurityIssues: job.files.filter(f => (f.securityIssues?.length || 0) > 0).length,
+      filesWithMetadata: job.files.filter(f => f.extractedData?.processingReport?.metadataRemoved).length,
     },
   };
 

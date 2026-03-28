@@ -4,6 +4,7 @@ const fileValidator = require('./validators/fileValidator');
 const securityChecker = require('./validators/securityChecker');
 const { extractContent } = require('./extractors/textExtractor');
 const { processImage } = require('./extractors/imageProcessor');
+const { sanitizeSvg } = require('./extractors/svgSanitizer');
 const piiRedactor = require('./sanitizers/piiRedactor');
 const jobManager = require('./jobs/jobManager');
 
@@ -60,6 +61,7 @@ async function processFile(filePath, originalFilename, jobId, fileId) {
         result.piiAnalysis = {
           found: piiAnalysis.summary,
           redactionApplied: piiAnalysis.summary.requiresRedaction,
+          detectedPatterns: (piiAnalysis.piiDetected || []).map(p => ({ type: p.type, count: p.count })),
         };
 
         if (piiAnalysis.summary.requiresRedaction) {
@@ -67,34 +69,92 @@ async function processFile(filePath, originalFilename, jobId, fileId) {
             ...extractedData,
             rawContent: piiAnalysis.redactedContent,
             preview: piiAnalysis.redactedContent.substring(0, 500),
+            beforeRedaction: extractedData.rawContent,
+            afterRedaction: piiAnalysis.redactedContent,
+            redactionDetails: {
+              originalLength: extractedData.rawContent.length,
+              redactedLength: piiAnalysis.redactedContent.length,
+              patternsRemoved: (piiAnalysis.piiDetected || []).map(p => p.type),
+            },
           };
           result.extractedData = sanitized;
-          result.warnings.push(`PII redacted: ${piiAnalysis.piiDetected.map(p => p.type).join(', ')}`);
+          result.warnings.push(`PII redacted: ${(piiAnalysis.piiDetected || []).map(p => p.type).join(', ')}`);
         } else {
           result.extractedData = extractedData;
         }
       } else {
         result.validationErrors.push(`Content extraction failed: ${extractedData.error}`);
       }
-    } else if (['PNG', 'JPG', 'GIF', 'SVG'].includes(fileType)) {
-      const imageData = processImage(filePath, fileType);
+    } else if (fileType === 'SVG') {
+      try {
+        const svgContent = fs.readFileSync(filePath, 'utf-8');
+        const sanitized = sanitizeSvg(svgContent);
+
+        const sanitizedPath = filePath + '.sanitized';
+        fs.writeFileSync(sanitizedPath, sanitized);
+
+        result.extractedData = {
+          type: 'SVG',
+          format: 'SVG',
+          sanitized: true,
+          sanitizedPath: sanitizedPath,
+          beforeSanitization: svgContent,
+          afterSanitization: sanitized,
+          sanitizationDetails: {
+            originalSize: svgContent.length,
+            sanitizedSize: sanitized.length,
+            bytesRemoved: svgContent.length - sanitized.length,
+          },
+          contentLength: sanitized.length,
+        };
+
+        if (svgContent.length !== sanitized.length) {
+          result.warnings.push('SVG sanitized: malicious content removed');
+        }
+      } catch (err) {
+        result.validationErrors.push(`SVG processing failed: ${err.message}`);
+      }
+    } else if (['PNG', 'JPG'].includes(fileType)) {
+      const imageData = await processImage(filePath, fileType);
 
       if (imageData.success) {
+        const normDims = imageData.normalization?.normalizedDimensions || imageData.original || {};
+
         result.extractedData = {
           type: 'IMAGE',
           format: fileType,
           dimensions: {
-            width: imageData.original?.width,
-            height: imageData.original?.height,
+            original: {
+              width: imageData.original?.width,
+              height: imageData.original?.height,
+            },
+            normalized: {
+              width: normDims.width || imageData.original?.width,
+              height: normDims.height || imageData.original?.height,
+            },
+          },
+          fileSize: {
+            original: imageData.original?.fileSize,
+            normalized: imageData.normalization?.normalizedSize,
+            compressionRatio: imageData.normalization?.compressionRatio,
           },
           metadata: imageData.original?.metadata,
           sanitized: imageData.sanitization.success,
+          normalized: imageData.normalization.success,
           sanitizedPath: imageData.sanitization.success ? imageData.sanitizedPath : null,
-          recommendation: imageData.recommendation,
+          processingReport: {
+            sanitizationStatus: imageData.sanitization.success ? 'COMPLETED' : 'NOT_NEEDED',
+            normalizationStatus: imageData.normalization.performed ? 'COMPLETED' : 'NOT_NEEDED',
+            metadataRemoved: imageData.original?.hasMetadata || false,
+          },
         };
 
         if (imageData.original?.hasMetadata) {
-          result.warnings.push(`Image metadata removed: ${Object.keys(imageData.original.metadata).filter(k => imageData.original.metadata[k].includes('detected')).join(', ')}`);
+          result.warnings.push(`Metadata removed: ${Object.keys(imageData.original.metadata).filter(k => imageData.original.metadata[k].includes('detected')).map(k => imageData.original.metadata[k]).join(', ')}`);
+        }
+
+        if (imageData.normalization.success && imageData.normalization.compressionRatio > 0) {
+          result.warnings.push(`Image normalized: ${imageData.normalization.compressionRatio}% compression, resized from ${imageData.original.width}x${imageData.original.height} to ${imageData.normalization.normalizedDimensions.width}x${imageData.normalization.normalizedDimensions.height}`);
         }
       } else {
         result.validationErrors.push(`Image processing failed: ${imageData.error}`);
@@ -113,7 +173,6 @@ function updateJobWithResult(jobId, result) {
     jobManager.updateFileResult(jobId, result.id, result);
     return result;
   } catch (err) {
-    console.error('Error updating job:', err);
     return result;
   }
 }

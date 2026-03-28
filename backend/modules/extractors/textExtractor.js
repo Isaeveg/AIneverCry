@@ -5,6 +5,7 @@ function removeTextNoise(content) {
     .replace(/[\r\n]{3,}/g, '\n\n')
     .replace(/[ \t]+/g, ' ')
     .replace(/^\s+|\s+$/gm, '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     .split('\n')
     .filter(line => line.trim().length > 0)
     .join('\n');
@@ -75,6 +76,7 @@ function extractFromCsv(filePath) {
       rowCount: cleanedData.length,
       columnCount: headers.length,
       data: cleanedData.slice(0, 10),
+      rawContent: content,
       preview: `${headers.length} columns, ${cleanedData.length} rows`,
     };
   } catch (err) {

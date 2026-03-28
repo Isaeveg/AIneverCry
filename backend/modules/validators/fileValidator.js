@@ -6,7 +6,6 @@ const FILE_SIGNATURES = {
   PDF: [0x25, 0x50, 0x44, 0x46],
   PNG: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
   JPG: [0xFF, 0xD8, 0xFF],
-  GIF: [0x47, 0x49, 0x46],
   SVG: null,
   CSV: null,
   TXT: null,
@@ -26,10 +25,9 @@ function getActualMimeType(filePath) {
     if (matchSignature(buffer, FILE_SIGNATURES.PNG)) return 'image/png';
     if (matchSignature(buffer, FILE_SIGNATURES.PDF)) return 'application/pdf';
     if (matchSignature(buffer, FILE_SIGNATURES.JPG)) return 'image/jpeg';
-    if (matchSignature(buffer, FILE_SIGNATURES.GIF)) return 'image/gif';
 
     const content = fs.readFileSync(filePath, 'utf-8');
-    if (content.trim().startsWith('<svg')) return 'image/svg+xml';
+    if (content.includes('<svg')) return 'image/svg+xml';
     if (content.includes(',') && content.split('\n')[0].split(',').length > 1) return 'text/csv';
     if (content.trim().startsWith('#') || /^#+\s/.test(content)) return 'text/markdown';
 
@@ -53,7 +51,6 @@ function mimeToStandardType(mimeType) {
   if (mimeType.includes('pdf')) return 'PDF';
   if (mimeType.includes('png')) return 'PNG';
   if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'JPG';
-  if (mimeType.includes('gif')) return 'GIF';
   if (mimeType.includes('svg')) return 'SVG';
   if (mimeType.includes('csv')) return 'CSV';
   if (mimeType.includes('markdown') || mimeType.includes('md')) return 'MD';
@@ -89,7 +86,6 @@ function validateFile(filePath, originalFilename) {
       png: 'image/png',
       jpg: 'image/jpeg',
       jpeg: 'image/jpeg',
-      gif: 'image/gif',
       svg: 'image/svg+xml',
       csv: 'text/csv',
       txt: 'text/plain',

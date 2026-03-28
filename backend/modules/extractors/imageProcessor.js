@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const sharp = require('sharp');
 
 function getImageDimensions(filePath) {
   try {
@@ -54,9 +55,9 @@ function checkExifData(filePath) {
       hasIptc,
       hasXmp,
       metadata: {
-        exif: hasExif ? 'EXIF data detected - will be removed' : 'No EXIF data',
-        iptc: hasIptc ? 'IPTC data detected - will be removed' : 'No IPTC data',
-        xmp: hasXmp ? 'XMP data detected - will be removed' : 'No XMP data',
+        exif: hasExif ? 'EXIF data detected - removed' : 'No EXIF data',
+        iptc: hasIptc ? 'IPTC data detected - removed' : 'No IPTC data',
+        xmp: hasXmp ? 'XMP data detected - removed' : 'No XMP data',
       },
     };
   } catch (err) {
@@ -121,22 +122,65 @@ function removeJpegMetadata(buffer) {
   return result.slice(0, resultPos);
 }
 
-function sanitizeImage(sourcePath, outputPath) {
-  try {
-    const fileBuffer = fs.readFileSync(sourcePath);
-    let sanitizedBuffer = fileBuffer;
+function removePngMetadata(buffer) {
+  const pngSignature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+  const chunks = [pngSignature];
 
-    if (fileBuffer[0] === 0xFF && fileBuffer[1] === 0xD8) {
-      sanitizedBuffer = removeJpegMetadata(fileBuffer);
+  let pos = 8;
+  while (pos < buffer.length) {
+    if (pos + 8 > buffer.length) break;
+
+    const length = buffer.readUInt32BE(pos);
+    const chunkType = buffer.slice(pos + 4, pos + 8).toString('ascii');
+
+    const isMetadata = ['tEXt', 'zTXt', 'iTXt', 'eXIf', 'tIME'].includes(chunkType);
+
+    if (!isMetadata) {
+      const chunkData = buffer.slice(pos, pos + 12 + length);
+      chunks.push(chunkData);
     }
 
-    fs.writeFileSync(outputPath, sanitizedBuffer);
+    pos += 12 + length;
+  }
+
+  return Buffer.concat(chunks);
+}
+
+async function normalizeImage(sourcePath, outputPath, maxWidth = 2000, maxHeight = 2000, quality = 95) {
+  try {
+    const image = sharp(sourcePath);
+    const metadata = await image.metadata();
+
+    let transform = image;
+
+    if (metadata.width > maxWidth || metadata.height > maxHeight) {
+      transform = transform.resize(maxWidth, maxHeight, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+    }
+
+    if (metadata.format === 'jpeg') {
+      transform = transform.jpeg({ quality, progressive: true });
+    } else if (metadata.format === 'png') {
+      transform = transform.png({ compressionLevel: 9 });
+    } else if (metadata.format === 'webp') {
+      transform = transform.webp({ quality });
+    }
+
+    await transform.toFile(outputPath);
+
+    const originalStats = fs.statSync(sourcePath);
+    const normalizedStats = fs.statSync(outputPath);
+    const normalizedMeta = await sharp(outputPath).metadata();
 
     return {
       success: true,
-      originalSize: fileBuffer.length,
-      sanitizedSize: sanitizedBuffer.length,
-      message: 'Image sanitized - metadata removed',
+      originalSize: originalStats.size,
+      normalizedSize: normalizedStats.size,
+      originalDimensions: { width: metadata.width, height: metadata.height },
+      normalizedDimensions: { width: normalizedMeta.width, height: normalizedMeta.height },
+      compressionRatio: Math.round((1 - normalizedStats.size / originalStats.size) * 100),
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -210,7 +254,7 @@ function getImageInfo(filePath, fileType) {
   }
 }
 
-function processImage(filePath, fileType) {
+async function processImage(filePath, fileType) {
   const imageInfo = getImageInfo(filePath, fileType);
 
   if (!imageInfo.success) {
@@ -218,30 +262,61 @@ function processImage(filePath, fileType) {
   }
 
   const sanitizedPath = filePath + '.sanitized';
-  const sanitization = sanitizeImage(filePath, sanitizedPath);
+  let sanitizationResult = { success: true, message: 'No sanitization needed' };
+  let normalizationResult = {
+    success: true,
+    performed: false,
+    message: 'No normalization needed',
+    compressionRatio: null,
+  };
 
-  const sanitizationMessage = imageInfo.hasMetadata
-    ? 'Image contains metadata - sanitized copy created'
-    : 'Image is clean - no metadata detected';
+  if (imageInfo.hasMetadata) {
+    const fileBuffer = fs.readFileSync(filePath);
+    let sanitizedBuffer = fileBuffer;
 
-  const normalizationMessage = imageInfo.normalization.needsNormalization
-    ? `Normalization recommended: ${imageInfo.normalization.details.sizingIssue}${imageInfo.normalization.needsCompression ? ', ' + imageInfo.normalization.details.compressionIssue : ''}`
-    : 'Image dimensions and size are optimal';
+    if (fileBuffer[0] === 0xFF && fileBuffer[1] === 0xD8) {
+      sanitizedBuffer = removeJpegMetadata(fileBuffer);
+    } else if (fileBuffer[0] === 0x89 && fileBuffer[1] === 0x50) {
+      sanitizedBuffer = removePngMetadata(fileBuffer);
+    }
+
+    fs.writeFileSync(sanitizedPath, sanitizedBuffer);
+    sanitizationResult = {
+      success: true,
+      originalSize: fileBuffer.length,
+      sanitizedSize: sanitizedBuffer.length,
+      message: 'Metadata removed',
+    };
+  } else {
+    fs.copyFileSync(filePath, sanitizedPath);
+  }
+
+  if (imageInfo.normalization.needsNormalization) {
+    const normalizedPath = filePath + '.normalized';
+    const quality = imageInfo.normalization.recommendedQuality;
+    const maxDim = imageInfo.normalization.needsSizeReduction ? 2000 : undefined;
+
+    normalizationResult = await normalizeImage(sanitizedPath, normalizedPath, maxDim, maxDim, quality);
+
+    if (normalizationResult.success) {
+      fs.copyFileSync(normalizedPath, sanitizedPath);
+      fs.unlinkSync(normalizedPath);
+      normalizationResult.performed = true;
+    }
+  } else {
+    normalizationResult.compressionRatio = null;
+  }
 
   return {
     success: true,
     type: fileType,
     original: imageInfo,
-    sanitization: sanitization,
+    sanitization: sanitizationResult,
+    normalization: normalizationResult,
     sanitizedPath: sanitizedPath,
-    normalizationReport: {
-      needsNormalization: imageInfo.normalization.needsNormalization,
-      recommendations: imageInfo.normalization,
-      message: normalizationMessage,
-    },
     status: {
-      sanitized: imageInfo.hasMetadata,
-      normalized: imageInfo.normalization.needsNormalization ? 'RECOMMENDED' : 'OK',
+      sanitized: imageInfo.hasMetadata ? 'COMPLETED' : 'NOT_NEEDED',
+      normalized: imageInfo.normalization.needsNormalization ? (normalizationResult.success ? 'COMPLETED' : 'FAILED') : 'NOT_NEEDED',
     }
   };
 }
@@ -249,7 +324,9 @@ function processImage(filePath, fileType) {
 module.exports = {
   getImageDimensions,
   checkExifData,
-  sanitizeImage,
+  removeJpegMetadata,
+  removePngMetadata,
+  normalizeImage,
   checkImageNormalization,
   getImageInfo,
   processImage,

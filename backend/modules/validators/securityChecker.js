@@ -50,13 +50,15 @@ function checkFilename(filename) {
 
 function checkFileContent(filePath, detectedType) {
   const issues = [];
+  const issueCodes = new Set();
 
   try {
     if (['PDF', 'TXT', 'CSV', 'MD', 'SVG'].includes(detectedType)) {
       const content = fs.readFileSync(filePath, 'utf-8');
 
       MALICIOUS_PATTERNS.xss.forEach(pattern => {
-        if (pattern.test(content)) {
+        if (pattern.test(content) && !issueCodes.has('XSS_PAYLOAD')) {
+          issueCodes.add('XSS_PAYLOAD');
           issues.push({
             severity: 'high',
             message: 'Potential XSS payload detected in content',
@@ -66,7 +68,8 @@ function checkFileContent(filePath, detectedType) {
       });
 
       MALICIOUS_PATTERNS.injectionPatterns.forEach(pattern => {
-        if (pattern.test(content)) {
+        if (pattern.test(content) && !issueCodes.has('INJECTION_PATTERN')) {
+          issueCodes.add('INJECTION_PATTERN');
           issues.push({
             severity: 'high',
             message: 'Potential injection attack pattern detected',
@@ -76,14 +79,16 @@ function checkFileContent(filePath, detectedType) {
       });
 
       if (detectedType === 'SVG') {
-        if (/<script/i.test(content)) {
+        if (/<script/i.test(content) && !issueCodes.has('SVG_SCRIPT')) {
+          issueCodes.add('SVG_SCRIPT');
           issues.push({
             severity: 'critical',
             message: 'SVG contains embedded script',
             code: 'SVG_SCRIPT',
           });
         }
-        if (/on\w+\s*=/i.test(content)) {
+        if (/on\w+\s*=/i.test(content) && !issueCodes.has('SVG_EVENT_HANDLER')) {
+          issueCodes.add('SVG_EVENT_HANDLER');
           issues.push({
             severity: 'high',
             message: 'SVG contains event handlers',
@@ -93,7 +98,7 @@ function checkFileContent(filePath, detectedType) {
       }
     }
 
-    if (['PNG', 'JPG', 'GIF'].includes(detectedType)) {
+    if (['PNG', 'JPG'].includes(detectedType)) {
       const buffer = Buffer.alloc(1024);
       const fd = fs.openSync(filePath, 'r');
       fs.readSync(fd, buffer, 0, 1024, 0);

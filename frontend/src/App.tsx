@@ -153,7 +153,7 @@ function App() {
             </>
           )}
           {activeTab === 'History' && renderGrid(historyFiles)}
-          {activeTab === 'Settings' && <div style={{color: '#666', fontSize: '0.8vw'}}>System configuration panel restricted.</div>}
+          {activeTab === 'Settings' && <div style={{color: '#666', fontSize: '0.9rem', padding: '1rem'}}>System configuration panel restricted.</div>}
         </section>
       </main>
 
@@ -161,8 +161,8 @@ function App() {
         <div className="modal-overlay" onClick={() => setSelectedFile(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Data Object Review: {selectedFile.name}</h2>
-              <button className="close-modal" onClick={() => setSelectedFile(null)}>✕</button>
+              <h2>Data Object Review</h2>
+              <button onClick={() => setSelectedFile(null)}>✕</button>
             </div>
             <div className="modal-body">
               <div className="view-panel">

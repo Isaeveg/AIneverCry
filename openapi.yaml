@@ -1,0 +1,96 @@
+openapi: 3.1.0
+info:
+  title: The Data Refinery API
+  version: 1.0.0
+  description: Secure gateway for transforming unstructured data into clean JSON.
+servers:
+  - url: http://localhost:4000/api/v1
+    description: Local developer server
+paths:
+  /jobs:
+    post:
+      summary: Upload files and create a job
+      description: Accepts an array of files (documents/images), validates them, and creates a Job.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '201':
+          description: Job successfully created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    example: pending
+
+  /jobs/{id}:
+    get:
+      summary: Get job status and file details
+      description: Used by the frontend to poll the status (pending -> processing -> completed).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current job status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId:
+                    type: string
+                  status:
+                    type: string
+                    enum: [pending, processing, completed, failed]
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        originalName:
+                          type: string
+                        detectedMime:
+                          type: string
+                        isMalicious:
+                          type: boolean
+                        extractedData:
+                          type: object
+
+  /jobs/{id}/export:
+    get:
+      summary: Export final JSON
+      description: Returns the aggregated and PII/metadata-cleaned JSON ready for download.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Final aggregated JSON
+          content:
+            application/json:
+              schema:
+                type: object

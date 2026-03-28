@@ -1,43 +1,29 @@
-# Gradle files
-.gradle/
-.classpath
-.project
-.settings/
-bin/
-
-# Build output
-build/
-.sonar
-target/
-bw-outputs/
-.scannerwork
-
-# IntelliJ
-.idea
-*.iml
-
-# MSBuild
-obj/
-
-# Node
-npm-debug.log
-
-# Mac
-.DS_Store
-
-# Windows
-Thumbs.db
-
-# vi
-*~
-
-# General
-log/
-*.log
-
-# Environment variables
-.env
-
+# Node.js & Dependencies
 node_modules/
+npm-debug.log
+yarn-error.log
 
+# Environment Variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Build Outputs (Frontend/Vite)
+dist/
+dist-ssr/
+build/
+
+# Backend Specific
 backend/uploads/
+/tmp/
+/generated/prisma
+
+# OS & IDE Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.sln
+*.sw?

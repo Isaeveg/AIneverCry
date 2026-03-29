@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+yarn-error.log
+.git
+.gitignore
+.DS_Store
+.env.local
+.env.*.local
+coverage
+__tests__
+*.md
+.vscode
+.idea

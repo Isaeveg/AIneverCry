@@ -99,7 +99,7 @@ app.get('/api/v1/jobs/:id/export', (req, res) => {
         }
 
         if (job.status !== jobManager.JOB_STATUSES.COMPLETED) {
-            return res.status(400).json({ error: 'Job is not completed yet', status: job.status });
+            return res.status(409).json({ error: 'Job is not completed yet', status: job.status, code: 'JOB_NOT_COMPLETED' });
         }
 
         const exportData = jobManager.exportJobAsJson(jobId);
@@ -149,6 +149,52 @@ app.get('/api/v1/health', (req, res) => {
         version: '1.0.0',
         uptime: process.uptime(),
     });
+});
+
+app.get('/docs', (req, res) => {
+    const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Data Refinery API Docs</title>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@3/swagger-ui.css">
+        <style>
+          body {
+            margin: 0;
+            padding: 0;
+          }
+        </style>
+      </head>
+      <body>
+        <div id="swagger-ui"></div>
+        <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@3/swagger-ui-bundle.js"></script>
+        <script>
+          window.onload = function() {
+            SwaggerUIBundle({
+              url: '/openapi.yaml',
+              dom_id: '#swagger-ui',
+              presets: [
+                SwaggerUIBundle.presets.apis,
+                SwaggerUIBundle.SwaggerUIStandalonePreset
+              ],
+              layout: "BaseLayout",
+              deepLinking: true
+            })
+          }
+        </script>
+      </body>
+    </html>
+    `;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+});
+
+app.get('/openapi.yaml', (req, res) => {
+    const spec = fs.readFileSync(path.join(__dirname, '../openapi.yaml'), 'utf-8');
+    res.setHeader('Content-Type', 'application/yaml');
+    res.send(spec);
 });
 
 app.listen(PORT, () => {

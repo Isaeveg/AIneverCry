@@ -1,6 +1,6 @@
 const PII_PATTERNS = {
-  email: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
-  phone: /(?:\+[\d]{1,3}[-.\s]?)?\(?[\d]{2,4}\)?[-.\s]?[\d]{2,4}[-.\s]?[\d]{2,4}(?:[-.\s]?[\d]{1,4})?\b/g,
+  email: /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g,
+  phone: /(?:\+\d{1,3}[\s.-]?)?(?:\(\d{3}\)[\s.-]?\d{3}[\s.-]?\d{4}|\d{3}[\s.-]\d{3}[\s.-](?:\d{4}|\d{3})|\d{2}[\s.-]\d{3}[\s.-]\d{2}[\s.-]\d{2})/g,
   ssn: /\b(?!000|666)[0-9]{3}-?(?!00)[0-9]{2}-?(?!0000)[0-9]{4}\b/g,
   creditCard: /\b(?:\d{4}[-\s]?){3}\d{4}\b/g,
   ipAddress: /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g,
@@ -18,6 +18,13 @@ function detectPII(text) {
   const findings = [];
   if (!text || typeof text !== 'string') return findings;
 
+  const nonAsciiCount = (text.match(/[^\x00-\x7F]/g) || []).length;
+  const nonAsciiRatio = text.length > 0 ? nonAsciiCount / text.length : 0;
+
+  if (nonAsciiRatio > 0.9) {
+    return findings;
+  }
+
   const emails = text.match(PII_PATTERNS.email);
   if (emails) {
     findings.push({
@@ -28,6 +35,7 @@ function detectPII(text) {
     });
   }
 
+  PII_PATTERNS.email.lastIndex = 0;
   PII_PATTERNS.phone.lastIndex = 0;
   const phones = text.match(PII_PATTERNS.phone);
   if (phones) {
@@ -49,6 +57,7 @@ function detectPII(text) {
     });
   }
 
+  PII_PATTERNS.ssn.lastIndex = 0;
   const creditCards = text.match(PII_PATTERNS.creditCard);
   if (creditCards) {
     findings.push({
@@ -59,6 +68,7 @@ function detectPII(text) {
     });
   }
 
+  PII_PATTERNS.creditCard.lastIndex = 0;
   const ips = text.match(PII_PATTERNS.ipAddress);
   if (ips) {
     findings.push({
@@ -69,6 +79,7 @@ function detectPII(text) {
     });
   }
 
+  PII_PATTERNS.ipAddress.lastIndex = 0;
   const apiKeys = text.match(PII_PATTERNS.apiKey);
   if (apiKeys) {
     findings.push({
@@ -79,6 +90,7 @@ function detectPII(text) {
     });
   }
 
+  PII_PATTERNS.apiKey.lastIndex = 0;
   const passwords = text.match(PII_PATTERNS.password);
   if (passwords) {
     findings.push({
@@ -88,6 +100,7 @@ function detectPII(text) {
     });
   }
 
+  PII_PATTERNS.password.lastIndex = 0;
   const privateKeys = text.match(PII_PATTERNS.privateKey);
   if (privateKeys) {
     findings.push({
@@ -97,11 +110,20 @@ function detectPII(text) {
     });
   }
 
+  PII_PATTERNS.privateKey.lastIndex = 0;
+
   return findings;
 }
 
 function redactPII(text) {
   if (!text || typeof text !== 'string') return text;
+
+  const nonAsciiCount = (text.match(/[^\x00-\x7F]/g) || []).length;
+  const nonAsciiRatio = text.length > 0 ? nonAsciiCount / text.length : 0;
+
+  if (nonAsciiRatio > 0.4) {
+    return text;
+  }
 
   let redacted = text;
   redacted = redacted.replace(PII_PATTERNS.email, '[EMAIL_REDACTED]');

@@ -8,7 +8,7 @@ RUN npm ci
 
 COPY . .
 
-RUN npm test --passWithNoTests
+RUN npm test -- --passWithNoTests
 
 RUN npm prune --omit=dev
 
@@ -18,13 +18,11 @@ WORKDIR /app
 
 RUN apk add --no-cache curl
 
-RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app .
 
-COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
-COPY --chown=nodejs:nodejs . .
-
-USER nodejs
+RUN mkdir -p /app/logs /app/temporaryFiles /app/jobs
 
 EXPOSE 4000
 

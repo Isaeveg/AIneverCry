@@ -25,7 +25,10 @@ describe('piiRedactor', () => {
         'simple@domain.com',
         'user.name@company.co.uk',
         'first+last@example.org',
-        'test_email@domain.net'
+        'test_email@domain.net',
+        'jole_144@hotmail.com',
+        'jolanta.madioury@sejmik.kielce.pl',
+        'rezerwacja@teatrroma.pl'
       ];
 
       testCases.forEach(email => {
@@ -50,7 +53,9 @@ describe('piiRedactor', () => {
       const testCases = [
         '555-123-4567',
         '(555)123-4567',
-        '+1-555-123-4567'
+        '+1-555-123-4567',
+        '22 628 89 98',
+        '+48 505 643 965'
       ];
 
       testCases.forEach(phone => {

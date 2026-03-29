@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const fileValidator = require('./validators/fileValidator');
 const securityChecker = require('./validators/securityChecker');
 const { extractContent } = require('./extractors/textExtractor');
@@ -54,9 +55,9 @@ async function processFile(filePath, originalFilename, jobId, fileId) {
       extractedData = extractContent(filePath, fileType, originalFilename);
 
       if (extractedData.success) {
-        const piiAnalysis = piiRedactor.analyzePII(
-          extractedData.rawContent || JSON.stringify(extractedData)
-        );
+        let contentForPii = extractedData.rawContent || JSON.stringify(extractedData);
+
+        const piiAnalysis = piiRedactor.analyzePII(contentForPii);
 
         result.piiAnalysis = {
           found: piiAnalysis.summary,
@@ -69,8 +70,6 @@ async function processFile(filePath, originalFilename, jobId, fileId) {
             ...extractedData,
             rawContent: piiAnalysis.redactedContent,
             preview: piiAnalysis.redactedContent.substring(0, 500),
-            beforeRedaction: extractedData.rawContent,
-            afterRedaction: piiAnalysis.redactedContent,
             redactionDetails: {
               originalLength: extractedData.rawContent.length,
               redactedLength: piiAnalysis.redactedContent.length,
@@ -93,13 +92,21 @@ async function processFile(filePath, originalFilename, jobId, fileId) {
         const sanitizedPath = filePath + '.sanitized';
         fs.writeFileSync(sanitizedPath, sanitized);
 
+        const beforeHash = crypto.createHash('sha256').update(svgContent).digest('hex');
+        const afterHash = crypto.createHash('sha256').update(sanitized).digest('hex');
+        const contentChanged = beforeHash !== afterHash;
+
         result.extractedData = {
           type: 'SVG',
           format: 'SVG',
           sanitized: true,
-          sanitizedPath: sanitizedPath,
-          beforeSanitization: svgContent,
-          afterSanitization: sanitized,
+          contentChanged: contentChanged,
+          contentHash: {
+            before: beforeHash,
+            after: afterHash,
+            bytesRemoved: svgContent.length - sanitized.length,
+            percentageReduced: parseFloat(((svgContent.length - sanitized.length) / svgContent.length * 100).toFixed(2)),
+          },
           sanitizationDetails: {
             originalSize: svgContent.length,
             sanitizedSize: sanitized.length,
@@ -108,7 +115,7 @@ async function processFile(filePath, originalFilename, jobId, fileId) {
           contentLength: sanitized.length,
         };
 
-        if (svgContent.length !== sanitized.length) {
+        if (contentChanged) {
           result.warnings.push('SVG sanitized: malicious content removed');
         }
       } catch (err) {
@@ -119,6 +126,13 @@ async function processFile(filePath, originalFilename, jobId, fileId) {
 
       if (imageData.success) {
         const normDims = imageData.normalization?.normalizedDimensions || imageData.original || {};
+
+        const detectedMetadataTypes = [];
+        if (imageData.original?.metadata) {
+          if (imageData.original.metadata.hasExif) detectedMetadataTypes.push('EXIF');
+          if (imageData.original.metadata.hasIptc) detectedMetadataTypes.push('IPTC');
+          if (imageData.original.metadata.hasXmp) detectedMetadataTypes.push('XMP');
+        }
 
         result.extractedData = {
           type: 'IMAGE',
@@ -138,19 +152,19 @@ async function processFile(filePath, originalFilename, jobId, fileId) {
             normalized: imageData.normalization?.normalizedSize,
             compressionRatio: imageData.normalization?.compressionRatio,
           },
-          metadata: imageData.original?.metadata,
+          metadataDetected: detectedMetadataTypes,
+          metadataRemoved: imageData.original?.hasMetadata || false,
           sanitized: imageData.sanitization.success,
           normalized: imageData.normalization.success,
-          sanitizedPath: imageData.sanitization.success ? imageData.sanitizedPath : null,
           processingReport: {
             sanitizationStatus: imageData.sanitization.success ? 'COMPLETED' : 'NOT_NEEDED',
             normalizationStatus: imageData.normalization.performed ? 'COMPLETED' : 'NOT_NEEDED',
-            metadataRemoved: imageData.original?.hasMetadata || false,
+            metadataRemovalStatus: imageData.original?.hasMetadata ? 'COMPLETED' : 'NOT_NEEDED',
           },
         };
 
-        if (imageData.original?.hasMetadata) {
-          result.warnings.push(`Metadata removed: ${Object.keys(imageData.original.metadata).filter(k => imageData.original.metadata[k].includes('detected')).map(k => imageData.original.metadata[k]).join(', ')}`);
+        if (detectedMetadataTypes.length > 0) {
+          result.warnings.push(`Metadata removed: ${detectedMetadataTypes.join(', ')}`);
         }
 
         if (imageData.normalization.success && imageData.normalization.compressionRatio > 0) {

@@ -202,7 +202,7 @@ function App() {
 
   const fetchJobData = async (jobId: string) => {
     try {
-      const response = await axios.get(`${API_URL}/jobs/${jobId}/export`);
+      const response = await axios.get(`${API_URL}/jobs/${jobId}`);
       return response.data;
     } catch (err) {
       console.error('Failed to fetch job data:', err);
@@ -327,11 +327,15 @@ function App() {
     setSelectedFile(file);
     setEditDesc(file.desc || '');
 
-    if (file.jobId) {
+    if (file.jobId && file.fileIndex !== undefined) {
       const jobData = await fetchJobData(file.jobId);
+      console.log(`[openReview] Fetched jobData:`, jobData);
       if (jobData?.files) {
-        const fileData = jobData.files.find((f: any) => f.originalName === file.name);
+        console.log(`[openReview] Looking for file at index: ${file.fileIndex} in ${jobData.files.length} files`);
+        const fileData = jobData.files[file.fileIndex];
+        console.log(`[openReview] Found fileData:`, fileData);
         if (fileData) {
+          console.log(`[openReview] Setting extractedData...`);
           setSelectedFile(prev => prev ? { ...prev, extractedData: fileData } : null);
         }
       }
@@ -367,17 +371,26 @@ function App() {
     </div>
   );
 
+  const sanitizeDataForDisplay = (data: any) => {
+    if (!data) return data;
+    const copy = JSON.parse(JSON.stringify(data));
+    if (copy.extracted?.rawContent) delete copy.extracted.rawContent;
+    if (copy.extracted?.preview) delete copy.extracted.preview;
+    if (copy.extracted?.beforeRedaction) delete copy.extracted.beforeRedaction;
+    if (copy.extracted?.afterRedaction) delete copy.extracted.afterRedaction;
+    return copy;
+  };
+
   const generateSanitizationPreview = (file: WorkspaceFile): string => {
     if (!file.extractedData) return 'Processing...';
 
     const { extractedData } = file;
     const messages: string[] = [];
 
-    const piiRedacted = extractedData.extracted?.piiRedacted || extractedData.processing?.piiRedacted;
+    const redactionDetails = extractedData.extracted?.redactionDetails || extractedData.redactionDetails;
 
-    if (piiRedacted) {
-      const patterns = extractedData.extracted?.redactionDetails?.patternsRemoved ||
-                       extractedData.redactionDetails?.patternsRemoved || [];
+    if (redactionDetails?.patternsRemoved && redactionDetails.patternsRemoved.length > 0) {
+      const patterns = redactionDetails.patternsRemoved;
       messages.push(`✓ PII redacted: ${patterns.join(', ')}`);
     }
 
@@ -562,7 +575,7 @@ function App() {
                   <div className="view-panel">
                     <h3>Schema Output</h3>
                     <pre className="json-box">
-                      {JSON.stringify(selectedFile.extractedData, null, 2)}
+                      {JSON.stringify(sanitizeDataForDisplay(selectedFile.extractedData), null, 2)}
                     </pre>
                   </div>
                 </>

@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { execSync } = require('child_process');
 
 function removeTextNoise(content) {
   return content
@@ -86,27 +87,8 @@ function extractFromCsv(filePath) {
 
 function extractFromPdf(filePath) {
   try {
-    const buffer = fs.readFileSync(filePath);
-    const text = buffer.toString('binary');
-    const textMatches = text.match(/BT([\s\S]*?)ET/g);
-    let extractedText = '';
-
-    if (textMatches) {
-      extractedText = textMatches
-        .join(' ')
-        .replace(/\(([^)]*)\)/g, '$1')
-        .replace(/[<>]/g, '')
-        .trim();
-    }
-
-    if (!extractedText) {
-      extractedText = buffer
-        .toString()
-        .replace(/[^\x20-\x7E\n]/g, '')
-        .trim();
-    }
-
-    const cleanContent = removeTextNoise(extractedText);
+    const content = execSync(`pdftotext "${filePath}" -`, { encoding: 'utf-8' });
+    const cleanContent = removeTextNoise(content);
     const preview = cleanContent.substring(0, 500);
     const lines = cleanContent.split('\n').length;
 
@@ -119,7 +101,30 @@ function extractFromPdf(filePath) {
       preview: preview,
     };
   } catch (err) {
-    return { success: false, error: err.message };
+    try {
+      const buffer = fs.readFileSync(filePath);
+      const latin1Text = buffer.toString('latin1');
+
+      const content = latin1Text
+        .split('\n')
+        .filter(line => {
+          const printable = line.replace(/[^\x20-\x7E]/g, '').length;
+          return printable > 10;
+        })
+        .join('\n');
+
+      const cleanContent = removeTextNoise(content);
+      return {
+        success: true,
+        type: 'PDF',
+        rawContent: cleanContent,
+        lines: cleanContent.split('\n').length,
+        characters: cleanContent.length,
+        preview: cleanContent.substring(0, 500),
+      };
+    } catch (fallbackErr) {
+      return { success: false, error: `PDF extraction failed: ${err.message}` };
+    }
   }
 }
 

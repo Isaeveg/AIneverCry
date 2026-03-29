@@ -137,12 +137,29 @@ function getJobSummary(jobId) {
     files: job.files.map(f => ({
       id: f.id,
       originalName: f.originalName,
+      type: f.detectedType,
       detectedType: f.detectedType,
+      mimeType: f.detectedMime,
+      secure: !f.isMalicious,
+      fileSize: f.fileSize,
       status: f.processedAt ? 'processed' : 'pending',
       isMalicious: f.isMalicious || false,
       hasErrors: (f.errors?.length > 0) || (f.validationErrors?.length > 0) || (f.securityIssues?.length > 0),
+      processing: {
+        validated: true,
+        extracted: !!f.extractedData,
+        sanitized: f.extractedData?.sanitized || false,
+        piiRedacted: f.extractedData?.beforeRedaction !== undefined,
+      },
+      metadata: {
+        fileSize: f.fileSize,
+        processedAt: f.processedAt,
+      },
+      extracted: f.extractedData || null,
+      warnings: f.warnings || [],
       securityIssues: f.securityIssues || [],
       validationErrors: f.validationErrors || [],
+      annotation: f.annotation || '',
     })),
   };
 }

@@ -2,7 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_URL = 'http://localhost:4000/api/v1';
+const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:4000/api/v1'
+  : `http://${window.location.hostname}:4000/api/v1`;
 
 const FileIcon = ({ type, isAlert }: { type: string, isAlert?: boolean }) => {
   const cls = isAlert ? "f-icon-alert" : `f-icon-${type.toLowerCase()}`;

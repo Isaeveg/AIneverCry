@@ -125,6 +125,26 @@ function getJobSummary(jobId) {
   const processedCount = job.files.filter(f => f.processedAt).length;
   const failedCount = job.files.filter(f => f.errors.length > 0).length;
 
+  const cleanExtractedData = (extracted) => {
+    if (!extracted) return null;
+
+    const cleaned = { ...extracted };
+    delete cleaned.rawContent;
+    delete cleaned.preview;
+    delete cleaned.beforeRedaction;
+    delete cleaned.afterRedaction;
+
+    if (!cleaned.piiRedaction && !cleaned.piiAnalysis) {
+      cleaned.piiAnalysis = {
+        performed: true,
+        patternsDetected: [],
+        requiresRedaction: false,
+      };
+    }
+
+    return cleaned;
+  };
+
   return {
     jobId: job.jobId,
     status: job.status,
@@ -149,13 +169,13 @@ function getJobSummary(jobId) {
         validated: true,
         extracted: !!f.extractedData,
         sanitized: f.extractedData?.sanitized || false,
-        piiRedacted: f.extractedData?.beforeRedaction !== undefined,
+        piiRedacted: (f.extractedData?.redactionDetails?.patternsRemoved?.length || 0) > 0,
       },
       metadata: {
         fileSize: f.fileSize,
         processedAt: f.processedAt,
       },
-      extracted: f.extractedData || null,
+      extracted: cleanExtractedData(f.extractedData),
       warnings: f.warnings || [],
       securityIssues: f.securityIssues || [],
       validationErrors: f.validationErrors || [],
@@ -177,7 +197,6 @@ function exportJobAsJson(jobId) {
         format: extracted.format,
         lines: extracted.lines,
         characters: extracted.characters,
-        preview: extracted.preview,
         headers: extracted.headers,
         columnCount: extracted.columnCount,
         rowCount: extracted.rowCount,
@@ -191,6 +210,12 @@ function exportJobAsJson(jobId) {
           patterns: extracted.redactionDetails.patternsRemoved,
           originalLength: extracted.redactionDetails.originalLength,
           redactedLength: extracted.redactionDetails.redactedLength,
+        };
+      } else {
+        cleaned.piiAnalysis = {
+          performed: true,
+          patternsDetected: [],
+          requiresRedaction: false,
         };
       }
 
@@ -222,7 +247,7 @@ function exportJobAsJson(jobId) {
         fileSize: {
           original: extracted.fileSize?.original,
         },
-        metadata: extracted.metadata || {},
+        metadataDetected: extracted.metadata ? Object.keys(extracted.metadata).filter(k => extracted.metadata[k]) : [],
         sanitizationStatus: extracted.processingReport?.sanitizationStatus || 'NOT_NEEDED',
         normalizationStatus: normalizationStatus,
       };
@@ -250,7 +275,7 @@ function exportJobAsJson(jobId) {
         validated: (f.validationErrors?.length || 0) === 0,
         extracted: !!f.extractedData,
         sanitized: f.extractedData?.sanitized || false,
-        piiRedacted: f.extractedData?.redactionDetails ? true : false,
+        piiRedacted: (f.extractedData?.redactionDetails?.patternsRemoved?.length || 0) > 0,
       },
     };
 

@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest --coverage --detectOpenHandles --forceExit",
+    "test:watch": "jest --watch",
     "dev": "nodemon index.js"
   },
   "keywords": [],
@@ -12,6 +13,7 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "jest": "^30.3.0",
     "nodemon": "^3.1.14",
     "prisma": "^7.6.0"
   },

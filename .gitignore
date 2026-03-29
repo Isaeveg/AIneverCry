@@ -18,6 +18,7 @@ build/
 backend/uploads/
 backend/jobs/
 backend/logs/
+backend/coverage/
 /tmp/
 /generated/prisma
 

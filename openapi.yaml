@@ -28,6 +28,14 @@ paths:
         Initiates a new data processing job with uploaded files.
         Files are queued for sequential processing immediately after job creation.
         Processing includes validation, content extraction, PII detection, metadata removal, and image normalization.
+
+        Workflow:
+        1. Upload files (batch up to 100 files)
+        2. Server validates each file by magic bytes
+        3. Job transitions to 'processing'
+        4. Files processed asynchronously
+        5. Poll /jobs/{jobId} to monitor progress
+        6. Download via /jobs/{jobId}/export when completed
       operationId: createJob
       requestBody:
         required: true
@@ -41,26 +49,28 @@ paths:
                   items:
                     type: string
                     format: binary
-                  description: Files to process (PDF, TXT, MD, CSV, JPG, PNG, SVG). Max 50MB each.
+                  description: |
+                    Files to process (PDF, TXT, MD, CSV, JPG, PNG, SVG).
+                    Max 50MB per file, max 100 files per request.
                   minItems: 1
                   maxItems: 100
               required:
                 - files
       responses:
         '201':
-          description: Job created successfully
+          description: Job created successfully and processing started
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobCreatedResponse'
         '400':
-          description: Invalid request
+          description: Invalid request (missing files, file too large)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Validation error
+          description: Validation error (unsupported format or corrupted file)
           content:
             application/json:
               schema:
@@ -109,6 +119,9 @@ paths:
       description: |
         Retrieves current job status and per-file processing progress.
         Poll endpoint every 1-2 seconds until status is 'completed' or 'failed'.
+
+        Status transitions:
+        pending → processing → completed or failed
       operationId: getJobStatus
       parameters:
         - name: jobId
@@ -119,7 +132,7 @@ paths:
             format: uuid
       responses:
         '200':
-          description: Job status
+          description: Job status with per-file progress
           content:
             application/json:
               schema:
@@ -139,6 +152,13 @@ paths:
       description: |
         Downloads unified JSON containing all processed data transformations.
         Available only when job status is 'completed'.
+
+        Export includes:
+        - Validation results per file
+        - Extracted text with PII redaction status
+        - Image metadata removal report
+        - Security issues detected
+        - Complete audit trail and statistics
       operationId: exportJob
       parameters:
         - name: jobId
@@ -161,7 +181,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: Job not completed
+          description: Job not completed yet
           content:
             application/json:
               schema:
@@ -175,6 +195,8 @@ paths:
       description: |
         Add or update annotation for a specific file within a job.
         Annotations are operator notes stored with the job and exported in final JSON.
+
+        Use cases: quality assessment, warnings, processing notes, data quality flags
       operationId: updateAnnotation
       parameters:
         - name: jobId
@@ -201,7 +223,7 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 1000
-                  description: Annotation text
+                  description: Operator annotation text
       responses:
         '200':
           description: Annotation saved successfully
@@ -209,6 +231,9 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - success
+                  - message
                 properties:
                   success:
                     type: boolean
@@ -222,6 +247,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Job or file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error while saving annotation
           content:
             application/json:
               schema:

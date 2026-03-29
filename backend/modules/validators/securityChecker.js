@@ -57,22 +57,24 @@ function checkFileContent(filePath, detectedType) {
       const content = fs.readFileSync(filePath, 'utf-8');
 
       MALICIOUS_PATTERNS.xss.forEach(pattern => {
+        pattern.lastIndex = 0;
         if (pattern.test(content) && !issueCodes.has('XSS_PAYLOAD')) {
           issueCodes.add('XSS_PAYLOAD');
           issues.push({
-            severity: 'high',
-            message: 'Potential XSS payload detected in content',
+            severity: 'critical',
+            message: 'XSS payload detected in content',
             code: 'XSS_PAYLOAD',
           });
         }
       });
 
       MALICIOUS_PATTERNS.injectionPatterns.forEach(pattern => {
+        pattern.lastIndex = 0;
         if (pattern.test(content) && !issueCodes.has('INJECTION_PATTERN')) {
           issueCodes.add('INJECTION_PATTERN');
           issues.push({
             severity: 'high',
-            message: 'Potential injection attack pattern detected',
+            message: 'SQL injection pattern detected',
             code: 'INJECTION_PATTERN',
           });
         }

@@ -141,6 +141,8 @@ function getJobSummary(jobId) {
       status: f.processedAt ? 'processed' : 'pending',
       isMalicious: f.isMalicious || false,
       hasErrors: (f.errors?.length > 0) || (f.validationErrors?.length > 0) || (f.securityIssues?.length > 0),
+      securityIssues: f.securityIssues || [],
+      validationErrors: f.validationErrors || [],
     })),
   };
 }

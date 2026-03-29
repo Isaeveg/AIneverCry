@@ -3,6 +3,8 @@ const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const yaml = require('js-yaml');
+const swaggerUi = require('swagger-ui-express');
 const jobManager = require('./modules/jobs/jobManager');
 const { processJobFiles } = require('./modules/fileProcessor');
 const logger = require('./modules/logger');
@@ -12,6 +14,20 @@ const PORT = 4000;
 
 app.use(cors());
 app.use(express.json());
+
+const openApiPath = path.join(__dirname, '..', 'openapi.yaml');
+const openApiDoc = yaml.load(fs.readFileSync(openApiPath, 'utf8'));
+
+app.get('/api/docs/swagger.json', (req, res) => {
+  res.json(openApiDoc);
+});
+
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiDoc, {
+  swaggerOptions: {
+    url: '/api/docs/swagger.json',
+    deepLinking: true
+  }
+}));
 
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
